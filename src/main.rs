@@ -1,76 +1,91 @@
-use macroquad::prelude::*;
-use rapier2d::prelude::*;
+use std::f32::consts::*;
 
-struct Jar;
-impl Jar {
-    fn new() -> Self {
-        Self {}
+use bevy::{
+    gltf::Gltf,
+    pbr::{CascadeShadowConfigBuilder, DirectionalLightShadowMap},
+    prelude::*,
+};
+use bevy_rapier3d::prelude::*;
+
+fn insert_coin(
+    mut commands: Commands,
+    keys: Res<Input<KeyCode>>,
+    asset_server: Res<AssetServer>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    let mesh_handle = asset_server.load("coin.glb#Mesh0/Primitive0");
+    if keys.just_pressed(KeyCode::Space) {
+        let mesh = meshes.get(&mesh_handle).unwrap();
+        let collider = Collider::from_bevy_mesh(&mesh, &ComputedColliderShape::TriMesh).unwrap();
+        commands
+            .spawn(SceneBundle {
+                scene: asset_server.load("coin.glb#Scene0"),
+                transform: Transform::from_xyz(0.0, 0.1, 0.0),
+                ..default()
+            })
+            .insert(RigidBody::Dynamic)
+            .insert(collider);
     }
 }
 
-#[macroquad::main("coinjar")]
-async fn main() {
-    let mut rigid_body_set = RigidBodySet::new();
-    let mut collider_set = ColliderSet::new();
+fn main() {
+    App::new()
+        .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
+        .insert_resource(AmbientLight {
+            color: Color::WHITE,
+            brightness: 1.0 / 5.0f32,
+        })
+        .insert_resource(DirectionalLightShadowMap { size: 4096 })
+        .add_plugins((
+            DefaultPlugins,
+            RapierPhysicsPlugin::<NoUserData>::default(),
+            RapierDebugRenderPlugin::default(),
+        ))
+        .add_systems(Startup, setup)
+        .add_systems(Update, (animate_light_direction, insert_coin))
+        .run();
+}
 
-    // Create the ground.
-    let collider = ColliderBuilder::cuboid(100.0, 0.1).build();
-    collider_set.insert(collider);
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.spawn((Camera3dBundle {
+        transform: Transform::from_xyz(0.7, 0.7, 1.0).looking_at(Vec3::new(0.0, 0.3, 0.0), Vec3::Y),
+        ..default()
+    },));
 
-    // Create the bouncing ball.
-    let rigid_body = RigidBodyBuilder::dynamic()
-        .translation(vector![0.0, 10.0])
-        .build();
-    let collider = ColliderBuilder::ball(0.5).restitution(0.7).build();
-    let ball_body_handle = rigid_body_set.insert(rigid_body);
-    collider_set.insert_with_parent(collider, ball_body_handle, &mut rigid_body_set);
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
+        // This is a relatively small scene, so use tighter shadow
+        // cascade bounds than the default for better quality.
+        // We also adjusted the shadow map to be larger since we're
+        // only using a single cascade.
+        cascade_shadow_config: CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            maximum_distance: 1.6,
+            ..default()
+        }
+        .into(),
+        ..default()
+    });
+    commands.spawn(SceneBundle {
+        scene: asset_server.load("jar.glb#Scene0"),
+        transform: Transform::from_xyz(0.0, 0.0, 0.0),
+        ..default()
+    });
+}
 
-    // Create other structures necessary for the simulation.
-    let gravity = vector![0.0, -9.81];
-    let integration_parameters = IntegrationParameters::default();
-    let mut physics_pipeline = PhysicsPipeline::new();
-    let mut island_manager = IslandManager::new();
-    let mut broad_phase = BroadPhase::new();
-    let mut narrow_phase = NarrowPhase::new();
-    let mut impulse_joint_set = ImpulseJointSet::new();
-    let mut multibody_joint_set = MultibodyJointSet::new();
-    let mut ccd_solver = CCDSolver::new();
-    let physics_hooks = ();
-    let event_handler = ();
-
-    let camera = Camera2D {
-        zoom: vec2(1.0, 1.0),
-        target: vec2(0., 0.),
-        ..Default::default()
-    };
-    set_camera(&camera);
-
-    loop {
-        physics_pipeline.step(
-            &gravity,
-            &integration_parameters,
-            &mut island_manager,
-            &mut broad_phase,
-            &mut narrow_phase,
-            &mut rigid_body_set,
-            &mut collider_set,
-            &mut impulse_joint_set,
-            &mut multibody_joint_set,
-            &mut ccd_solver,
-            None,
-            &physics_hooks,
-            &event_handler,
+fn animate_light_direction(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, With<DirectionalLight>>,
+) {
+    for mut transform in &mut query {
+        transform.rotation = Quat::from_euler(
+            EulerRot::ZYX,
+            0.0,
+            time.elapsed_seconds() * PI / 5.0,
+            -FRAC_PI_4,
         );
-
-        let ball_body = &rigid_body_set[ball_body_handle];
-        println!("Ball altitude: {}", ball_body.translation().y);
-
-        clear_background(BLACK);
-
-        draw_rectangle(-0.3, -0.2, 0.01, 1., BLUE);
-        draw_rectangle(0.3, -0.2, 0.01, 1., YELLOW);
-        draw_rectangle(-0.3, 0.8, 0.6, 0.02, GREEN);
-
-        next_frame().await
     }
 }
