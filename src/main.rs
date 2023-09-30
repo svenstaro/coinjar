@@ -1,11 +1,19 @@
 use std::f32::consts::*;
 
 use bevy::{
+    asset::LoadState,
     gltf::Gltf,
     pbr::{CascadeShadowConfigBuilder, DirectionalLightShadowMap},
     prelude::*,
 };
 use bevy_rapier3d::prelude::*;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    LoadingState,
+    MainState,
+}
 
 fn insert_coin(
     mut commands: Commands,
@@ -28,6 +36,25 @@ fn insert_coin(
     }
 }
 
+fn load_stuff(asset_server: Res<AssetServer>) {
+    let coin: Handle<Gltf> = asset_server.load("coin.glb");
+    let jar: Handle<Gltf> = asset_server.load("jar.glb");
+    let handles = vec![coin, jar];
+
+    match asset_server.get_group_load_state(handles.into_iter().map(|x| x.id())) {
+        LoadState::Failed => {
+            panic!("Some shit failed to load")
+        }
+        LoadState::Loaded => {
+            // next state
+        }
+        LoadState::Loading => {
+            println!("loading")
+        }
+        _ => {}
+    }
+}
+
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
@@ -41,6 +68,8 @@ fn main() {
             RapierPhysicsPlugin::<NoUserData>::default(),
             RapierDebugRenderPlugin::default(),
         ))
+        .add_state::<AppState>()
+        .add_systems(OnEnter(AppState::LoadingState), load_stuff)
         .add_systems(Startup, setup)
         .add_systems(Update, (animate_light_direction, insert_coin))
         .run();
